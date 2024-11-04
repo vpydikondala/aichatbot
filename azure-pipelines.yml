@@ -1,0 +1,66 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+  ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+  ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+  ARM_TENANT_ID: $(ARM_TENANT_ID)
+  TF_STATE_CONTAINER_NAME: 'terraform-state'
+  TF_STATE_RESOURCE_GROUP: 'rg-terraform-backend'
+  TF_STATE_STORAGE_ACCOUNT_NAME: 'yourstorageaccountname'
+
+stages:
+- stage: DeployInfrastructure
+  jobs:
+  - job: TerraformDeployment
+    displayName: "Deploy Azure Infrastructure with Terraform"
+    steps:
+    - task: AzureKeyVault@1
+      inputs:
+        azureSubscription: 'YourServiceConnectionName'
+        KeyVaultName: 'your-keyvault-name'
+        SecretsFilter: 'ARM_CLIENT_ID,ARM_CLIENT_SECRET,ARM_SUBSCRIPTION_ID,ARM_TENANT_ID'
+        RunAsPreJob: true
+
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.x'
+        addToPath: true
+
+    - task: TerraformInstaller@0
+      inputs:
+        terraformVersion: '1.0.0'
+
+    - script: |
+        echo "Initializing Terraform..."
+        terraform init \
+          -backend-config="storage_account_name=$(TF_STATE_STORAGE_ACCOUNT_NAME)" \
+          -backend-config="container_name=$(TF_STATE_CONTAINER_NAME)" \
+          -backend-config="key=terraform.tfstate" \
+          -backend-config="resource_group_name=$(TF_STATE_RESOURCE_GROUP)" \
+          -backend-config="access_key=$(ARM_CLIENT_SECRET)"
+      displayName: 'Terraform Init'
+
+    - script: |
+        echo "Validating Terraform files..."
+        terraform validate
+      displayName: 'Terraform Validate'
+
+    - script: |
+        echo "Planning Terraform deployment..."
+        terraform plan -out=tfplan -var="client_id=$(ARM_CLIENT_ID)" \
+          -var="client_secret=$(ARM_CLIENT_SECRET)" \
+          -var="subscription_id=$(ARM_SUBSCRIPTION_ID)" \
+          -var="tenant_id=$(ARM_TENANT_ID)"
+      displayName: 'Terraform Plan'
+
+    - script: |
+        echo "Applying Terraform configuration..."
+        terraform apply -auto-approve tfplan
+      displayName: 'Terraform Apply'
